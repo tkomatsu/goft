@@ -2,7 +2,7 @@ GOCMD=go
 NAME=goft
 INSTALL_PATH=/usr/local/bin
 CONFIG_FILE_EXAMPLE=config.example.yml
-CONFIG_FILE_DIR=$$HOME/config/goft
+CONFIG_FILE_DIR=$$HOME/.config/goft
 CONFIG_FILE_TARGET=$(CONFIG_FILE_DIR)/config.yml
 VERSION ?= "development-version"
 all: $(NAME)
