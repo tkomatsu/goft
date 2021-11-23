@@ -5,14 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"golang.org/x/oauth2/clientcredentials"
+	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/fatih/color"
+	"golang.org/x/oauth2/clientcredentials"
 )
 
 // APIInterface interface for a struct that talks to the 42 API
@@ -23,25 +27,31 @@ type APIInterface interface {
 	PostJSON(url string, data interface{}) (resp *http.Response, err error)
 	Patch(url string, contentType string, body io.Reader) (resp *http.Response, err error)
 	PatchJSON(url string, data interface{}) (resp *http.Response, err error)
+
 	CreateUser(user *User, campusID int) error
 	SetUserImage(login string, img *os.File) error
 	CreateClose(close *Close) error
 	GetUserByLogin(login string) (*User, error)
 	UpdateUser(login string, data *User) error
+
 	AddCorrectionPoints(login string, points uint, reason string) error
 	RemoveCorrectionPoints(login string, points uint, reason string) error
+
 	GetUserAgus(login string) ([]Agu, error)
 	CreateFreePastAgu(login string, duration int, reason string) error
+
+	GetProjectByName(name string) (*Project, error)
+	GetUserProjects(login string, filter_param map[string]string, range_param map[string]string, page_number int) ([]*ProjectUser, error)
 }
 
 // API This is a struct to send authenticated requests to the 42 API
 type API struct {
 	apiEndpoint string
-	httpClient *http.Client
+	httpClient  *http.Client
 }
 
 // New Creates an API instance
-func New(apiEndpoint string, authenticatedClient *http.Client) APIInterface  {
+func New(apiEndpoint string, authenticatedClient *http.Client) APIInterface {
 	return &API{
 		apiEndpoint: apiEndpoint,
 		httpClient:  authenticatedClient,
@@ -55,7 +65,7 @@ func NewFromCredentials(apiEndpoint string, oauthCredentials *clientcredentials.
 	return New(apiEndpoint, authenticatedClient)
 }
 
-func (ft *API) newRequest(method string, contentType string, url string, body io.Reader) (*http.Request, error)  {
+func (ft *API) newRequest(method string, contentType string, url string, body io.Reader) (*http.Request, error) {
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return nil, err
@@ -66,7 +76,7 @@ func (ft *API) newRequest(method string, contentType string, url string, body io
 }
 
 // Execute the request
-func (ft *API) do(req *http.Request) (*http.Response, error)  {
+func (ft *API) do(req *http.Request) (*http.Response, error) {
 	for {
 		resp, err := ft.httpClient.Do(req)
 		if err != nil {
@@ -85,7 +95,7 @@ func (ft *API) do(req *http.Request) (*http.Response, error)  {
 			time.Sleep(time.Duration(retryAfter) * time.Second)
 			continue
 		}
-		return resp,err
+		return resp, err
 	}
 }
 
@@ -103,7 +113,7 @@ func (ft *API) Get(url string) (*http.Response, error) {
 }
 
 // Post sends a POST request to the given url
-func (ft *API) Post(url string, contentType string, body io.Reader) (resp *http.Response, err error)  {
+func (ft *API) Post(url string, contentType string, body io.Reader) (resp *http.Response, err error) {
 	req, err := ft.newRequest("POST", contentType, ft.apiEndpoint+url, body)
 	if err != nil {
 		return nil, err
@@ -160,16 +170,16 @@ func (ft *API) DeleteJSON(url string, data interface{}) (resp *http.Response, er
 
 // CreateUser creates a new user and sets `user` id and url to the one returned by the API
 // Following fields are required: login, email, first_name, last_name, kind
-func (ft *API) CreateUser(user *User, campusID int) error  {
+func (ft *API) CreateUser(user *User, campusID int) error {
 	// Prepare payload format
 	payload := map[string]map[string]interface{}{
 		"user": {
-			"login": user.Login,
-			"email": user.Email,
+			"login":      user.Login,
+			"email":      user.Email,
 			"first_name": user.FirstName,
-			"last_name": user.LastName,
-			"kind": user.Kind,
-			"campus_id": campusID,
+			"last_name":  user.LastName,
+			"kind":       user.Kind,
+			"campus_id":  campusID,
 		},
 	}
 	resp, err := ft.PostJSON("/users", payload)
@@ -218,10 +228,10 @@ func (ft *API) SetUserImage(login string, img *os.File) error {
 }
 
 // CreateClose creates a new close for the close.user, following properties must be set: close.Kind, close.Reason and close.User.Login
-func (ft *API) CreateClose(close *Close) error  {
+func (ft *API) CreateClose(close *Close) error {
 	payload := map[string]map[string]interface{}{
 		"close": {
-			"kind": close.Kind,
+			"kind":   close.Kind,
 			"reason": close.Reason,
 		},
 	}
@@ -248,8 +258,8 @@ func (ft *API) CreateClose(close *Close) error  {
 }
 
 // GetUserByLogin gets a user by the provided login
-func (ft *API) GetUserByLogin(login string) (*User, error)  {
-	resp, err := ft.Get("/users/"+login)
+func (ft *API) GetUserByLogin(login string) (*User, error) {
+	resp, err := ft.Get("/users/" + login)
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +359,7 @@ func (ft *API) RemoveCorrectionPoints(login string, points uint, reason string) 
 
 // GetUserAgus get all AGUs for a user
 func (ft *API) GetUserAgus(login string) ([]Agu, error) {
-	resp, err := ft.Get("/users/"+login+"/anti_grav_units_users")
+	resp, err := ft.Get("/users/" + login + "/anti_grav_units_users")
 	if err != nil {
 		return nil, err
 	}
@@ -391,4 +401,70 @@ func (ft *API) CreateFreePastAgu(login string, duration int, reason string) erro
 		}
 	}
 	return nil
+}
+
+func (ft *API) GetProjectByName(name string) (*Project, error) {
+	resp, err := ft.Get("/projects/" + name)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		switch resp.StatusCode {
+		case http.StatusNotFound:
+			return nil, errors.New("user not found")
+		default:
+			return nil, errors.New("failed getting user")
+		}
+	}
+	var project Project
+	err = parseJSON(resp.Body, &project)
+	if err != nil {
+		return nil, err
+	}
+	return &project, nil
+}
+
+func (ft *API) GetUserProjects(login string, filter_param map[string]string, range_param map[string]string, page_number int) ([]*ProjectUser, error) {
+	if login == "" {
+		return nil, errors.New("login not found")
+	}
+	req, err := http.NewRequest("GET", ft.apiEndpoint+"/users/"+login+"/projects_users", nil)
+	if err != nil {
+		color.Set(color.FgRed)
+		log.Print("http.NewRequest:", err)
+		color.Set(color.Reset)
+		return nil, err
+	}
+	params := req.URL.Query()
+	for k, v := range filter_param {
+		params.Add("filter["+k+"]", v)
+	}
+	for k, v := range range_param {
+		params.Add("range["+k+"]", v)
+	}
+	if page_number > 0 {
+		str_num := strconv.Itoa(page_number)
+		params.Add("page[number]", str_num)
+	}
+	req.URL.RawQuery = params.Encode()
+	resp, err := ft.do(req)
+	if err != nil {
+		color.Set(color.FgRed)
+		log.Print("ft.do:", err)
+		color.Set(color.Reset)
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var projects []*ProjectUser
+	err = parseJSON(resp.Body, &projects)
+	if err != nil {
+		color.Set(color.FgRed)
+		log.Print("parseJSON:", err)
+		color.Set(color.FgBlue)
+		fmt.Println(resp)
+		color.Set(color.Reset)
+		return nil, err
+	}
+	return projects, nil
 }
